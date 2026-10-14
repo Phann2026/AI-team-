@@ -1,0 +1,294 @@
+// Prisma Schema for « ដំណើរកំសាន្ត » (Domnoer Komsan)
+// Cambodian Travel Booking Platform with Multi-Currency & Dynamic Locations
+// Database: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum UserRole {
+  USER
+  TOUR_GUIDE
+  TRAVEL_AGENCY_ADMIN
+  SUPER_ADMIN
+}
+
+enum Currency {
+  USD // US Dollar (widely circulated in Cambodia)
+  KHR // Cambodian Riel (៛)
+}
+
+enum TravelType {
+  CULTURAL_HERITAGE // e.g., Angkor Wat, Pagodas, Museums
+  ECO_ADVENTURE     // e.g., Mondulkiri, Cardamom Mountains, Trekking
+  ISLAND_BEACH      // e.g., Koh Rong, Koh Rong Sanloem, Kep
+  LUXURY_WELLNESS   // e.g., Boutique riverside villas, spas
+  CULINARY_LOCAL    // e.g., Street food tours, Cooking classes
+}
+
+enum DifficultyLevel {
+  EASY
+  MODERATE
+  CHALLENGING
+  EXTREME
+}
+
+enum Region {
+  CENTRAL  // Phnom Penh, Kandal
+  NORTH    // Siem Reap, Preah Vihear, Oddar Meanchey
+  COASTAL  // Kampot, Kep, Preah Sihanouk, Koh Kong
+  HIGHLAND // Mondulkiri, Ratanakiri, Pursat
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PENDING_VERIFICATION
+  PAID
+  REFUNDED
+  FAILED
+}
+
+enum PaymentMethod {
+  KHQR         // Bakong / Universal Cambodian QR code standard
+  ABA_PAY      // ABA Mobile Pay
+  WING_MONEY   // Wing Bank
+  ACLEDA_PAY   // ACLEDA Unity
+  CREDIT_CARD  // Visa / MasterCard
+  CASH_ON_SITE // Pay cash upon arrival in Cambodia
+}
+
+// -----------------------------------------------------------------------------
+// MODELS
+// -----------------------------------------------------------------------------
+
+/// Registered customers, tour operators, and administrators
+model User {
+  id                String       @id @default(cuid())
+  email             String       @unique
+  passwordHash      String
+  fullName          String
+  phoneNumber       String?
+  avatarUrl         String?
+  role              UserRole     @default(USER)
+  preferredLanguage String       @default("km") // "km" or "en"
+  preferredCurrency Currency     @default(USD)
+  isActive          Boolean      @default(true)
+  emailVerifiedAt   DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  // Relationships
+  bookings          Booking[]
+  reviews           Review[]
+  wishlists         Wishlist[]
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+/// Dynamic Cambodian Destinations (e.g., Siem Reap, Kampot, Koh Rong, Mondulkiri)
+model Destination {
+  id                 String       @id @default(cuid())
+  slug               String       @unique
+  nameKhmer          String       // e.g. សៀមរាប
+  nameEnglish        String       // e.g. Siem Reap
+  province           String       // e.g. Siem Reap Province
+  region             Region       @default(NORTH)
+  descriptionKhmer   String       @db.Text
+  descriptionEnglish String       @db.Text
+  heroImage          String       // URL of banner image
+  galleryImages      String[]     @default([])
+  latitude           Decimal?     @db.Decimal(10, 8)
+  longitude          Decimal?     @db.Decimal(11, 8)
+  isFeatured         Boolean      @default(false)
+  isActive           Boolean      @default(true)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  // Relationships
+  primaryTours       TourPackage[] @relation("PrimaryDestination")
+  itineraryStops     TourStop[]    // Dynamic multi-destination stops
+
+  @@index([slug])
+  @@index([region])
+  @@index([isFeatured])
+  @@map("destinations")
+}
+
+/// Tour Packages with Multi-Currency Pricing (USD and KHR)
+model TourPackage {
+  id                 String          @id @default(cuid())
+  slug               String          @unique
+  titleKhmer         String          // e.g. ដំណើរទស្សនកិច្ចប្រាសាទអង្គរវត្ត ៣ ថ្ងៃ
+  titleEnglish       String          // e.g. 3-Day Ultimate Angkor Sunrise & Heritage
+  summaryKhmer       String          @db.VarChar(500)
+  summaryEnglish     String          @db.VarChar(500)
+  descriptionKhmer   String          @db.Text
+  descriptionEnglish String          @db.Text
+  durationDays       Int             @default(1)
+  durationNights     Int             @default(0)
+  maxGroupSize       Int             @default(12)
+  travelType         TravelType      @default(CULTURAL_HERITAGE)
+  difficulty         DifficultyLevel @default(EASY)
+  
+  // Dual-Currency Pricing
+  priceUsd           Decimal         @db.Decimal(10, 2) // Price in US Dollars ($)
+  priceKhr           Decimal         @db.Decimal(14, 2) // Price in Cambodian Riel (៛)
+  discountPercent    Int?            @default(0)
+
+  // Inclusions & Exclusions
+  inclusions         String[]        @default([]) // e.g. ["English/Khmer Guide", "Air-conditioned van", "Cold drinking water"]
+  exclusions         String[]        @default([]) // e.g. ["Angkor Pass ticket ($37)", "Personal travel insurance"]
+  
+  // Media & Badges
+  featuredImage      String
+  galleryImages      String[]        @default([])
+  isFeatured         Boolean         @default(false)
+  isActive           Boolean         @default(true)
+  
+  // Primary Destination relation
+  destinationId      String
+  destination        Destination     @relation("PrimaryDestination", fields: [destinationId], references: [id], onDelete: Restrict)
+
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  // Relationships
+  stops              TourStop[]      // Dynamic itinerary locations
+  bookings           Booking[]
+  reviews            Review[]
+  wishlists          Wishlist[]
+
+  @@index([destinationId])
+  @@index([travelType])
+  @@index([isFeatured])
+  @@index([priceUsd])
+  @@map("tour_packages")
+}
+
+/// Junction table for Tour Packages that span dynamic locations (e.g., Siem Reap -> Battambang -> Kampot)
+model TourStop {
+  id            String       @id @default(cuid())
+  dayNumber     Int          @default(1)
+  stopOrder     Int          @default(1)
+  notesKhmer    String?
+  notesEnglish  String?
+  
+  // Relations
+  tourPackageId String
+  tourPackage   TourPackage  @relation(fields: [tourPackageId], references: [id], onDelete: Cascade)
+  
+  destinationId String
+  destination   Destination  @relation(fields: [destinationId], references: [id], onDelete: Restrict)
+
+  @@unique([tourPackageId, dayNumber, stopOrder])
+  @@index([destinationId])
+  @@map("tour_stops")
+}
+
+/// Bookings made by Travelers
+model Booking {
+  id                 String        @id @default(cuid())
+  bookingNumber      String        @unique // e.g. "DK-2026-88291"
+  startDate          DateTime      @db.Date
+  endDate            DateTime      @db.Date
+  numberOfAdults     Int           @default(1)
+  numberOfChildren   Int           @default(0)
+  
+  // Pricing & Multi-Currency lock
+  selectedCurrency   Currency      @default(USD)
+  unitPrice          Decimal       @db.Decimal(14, 2) // Snapshot of price at time of booking
+  totalAmount        Decimal       @db.Decimal(14, 2) // Paid amount in selectedCurrency
+  exchangeRateUsed   Decimal       @default(4100.00) @db.Decimal(8, 2) // USD/KHR exchange rate snapshot
+  
+  // Statuses
+  status             BookingStatus @default(PENDING)
+  paymentStatus      PaymentStatus @default(UNPAID)
+  paymentMethod      PaymentMethod @default(KHQR)
+  transactionRef     String?       // Bank/Gateway transaction reference ID
+
+  // Customer Contact Snapshot
+  contactName        String
+  contactEmail       String
+  contactPhone       String
+  specialNotes       String?       @db.Text
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  // Relationships
+  userId             String
+  user               User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  tourPackageId      String
+  tourPackage        TourPackage   @relation(fields: [tourPackageId], references: [id], onDelete: Restrict)
+
+  review             Review?
+
+  @@index([userId])
+  @@index([tourPackageId])
+  @@index([bookingNumber])
+  @@index([status])
+  @@index([paymentStatus])
+  @@map("bookings")
+}
+
+/// Customer Reviews and Ratings
+model Review {
+  id            String      @id @default(cuid())
+  rating        Int         @db.SmallInt // 1 to 5 stars
+  title         String?     @db.VarChar(200)
+  comment       String      @db.Text
+  images        String[]    @default([])
+  isVerified    Boolean     @default(true) // Verified actual traveler
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relationships
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tourPackageId String
+  tourPackage   TourPackage @relation(fields: [tourPackageId], references: [id], onDelete: Cascade)
+
+  bookingId     String?     @unique
+  booking       Booking?    @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([tourPackageId])
+  @@index([userId])
+  @@index([rating])
+  @@map("reviews")
+}
+
+/// User Wishlist / Saved Trips
+model Wishlist {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tourPackageId String
+  tourPackage   TourPackage @relation(fields: [tourPackageId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime    @default(now())
+
+  @@unique([userId, tourPackageId])
+  @@map("wishlists")
+}
